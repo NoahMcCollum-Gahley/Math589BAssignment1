@@ -53,6 +53,98 @@ def total_energy(positions, n_beads, epsilon=1.0, sigma=1.0, b=1.0, k_b=100.0):
 
     return energy
 
+# THIS IS NEW:BFGS Optimization Algorithm
+def bfgs_optimization(func, grad_func, x0, max_iters=1000, tol=1e-6):
+    """
+    Custom implementation of the BFGS optimization algorithm.
+    
+    Parameters:
+    func : callable
+        The objective function to minimize (e.g., total_energy).
+    grad_func : callable
+        The gradient of the objective function.
+    x0 : np.ndarray
+        Initial guess (flattened bead positions).
+    max_iters : int, optional
+        Maximum number of iterations (default is 1000).
+    tol : float, optional
+        Convergence tolerance (default is 1e-6).
+    
+    Returns:
+    x : np.ndarray
+        Optimized bead positions.
+    trajectory : list of np.ndarray
+        List of intermediate positions for visualization.
+    """
+    n = x0.shape[0]
+    x = x0.copy()
+    trajectory = [x.copy()]
+    
+    H = np.eye(n)  # Approximate inverse Hessian (initialized as identity)
+    grad = grad_func(x)
+    
+    for i in range(max_iters):
+        grad_norm = np.linalg.norm(grad)
+        if grad_norm < tol:
+            print(f"Converged after {i} iterations.")
+            break
+        
+        # Compute search direction: p = -H * grad
+        p = -H @ grad
+        
+        # Line search (Armijo condition)
+        alpha = 1.0
+        while func(x + alpha * p) > func(x) + 1e-4 * alpha * np.dot(grad, p):
+            alpha *= 0.5
+            if alpha < 1e-8:
+                print("Step size too small, stopping.")
+                return x, trajectory
+        
+        # Update position
+        s = alpha * p
+        x_new = x + s
+        
+        # Compute gradient at new position
+        grad_new = grad_func(x_new)
+        y = grad_new - grad
+        
+        # BFGS Update
+        sy = np.dot(s, y)
+        if sy > 1e-10:  # Avoid division by zero
+            rho = 1.0 / sy
+            I = np.eye(n)
+            H = (I - rho * np.outer(s, y)) @ H @ (I - rho * np.outer(y, s)) + rho * np.outer(s, s)
+        
+        x = x_new
+        grad = grad_new
+        trajectory.append(x.copy())
+    
+    return x, trajectory
+
+# THIS IS NEW: Gradient function for total energy
+def compute_gradient(positions, n_beads, epsilon=1.0, sigma=1.0, b=1.0, k_b=100.0):
+    """
+    Compute the gradient of the total energy function.
+    """
+    grad = np.zeros_like(positions)
+    positions = positions.reshape((n_beads, -1))
+    
+    for i in range(n_beads - 1):
+        r = np.linalg.norm(positions[i+1] - positions[i])
+        force = 2 * k_b * (r - b) * (positions[i+1] - positions[i]) / r
+        grad[i] -= force
+        grad[i+1] += force
+    
+    for i in range(n_beads):
+        for j in range(i + 1, n_beads):
+            r = np.linalg.norm(positions[i] - positions[j])
+            if r > 1e-2:
+                force = -4 * epsilon * (12 * (sigma**12 / r**14) - 6 * (sigma**6 / r**8)) * (positions[i] - positions[j])
+                grad[i] += force
+                grad[j] -= force
+    
+    return grad.flatten()
+
 # Optimization function
 def optimize_protein(positions, n_beads, write_csv=False, maxiter=1000, tol=1e-6):
     """
@@ -89,11 +181,13 @@ def optimize_protein(positions, n_beads, write_csv=False, maxiter=1000, tol=1e-6
     """
     trajectory = []
 
+    """
     def callback(x):
         trajectory.append(x.reshape((n_beads, -1)))
         if len(trajectory) % 20 == 0:
             print(len(trajectory))
-
+    """
+    """"
     result = minimize(
         fun=total_energy,
         x0=positions.flatten(),
@@ -102,6 +196,15 @@ def optimize_protein(positions, n_beads, write_csv=False, maxiter=1000, tol=1e-6
         callback=callback,
         tol=tol,
         options={'maxiter': maxiter, 'disp': True}
+    )
+    """
+    #THIS IS NEW
+    x_opt, trajectory = bfgs_optimization(
+        func=lambda x: total_energy(x, n_beads),
+        grad_func=lambda x: compute_gradient(x, n_beads),
+        x0=positions.flatten(),
+        max_iters=maxiter,
+        tol=tol
     )
     if write_csv:
         csv_filepath = f'protein{n_beads}.csv'
