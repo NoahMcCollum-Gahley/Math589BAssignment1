@@ -126,7 +126,7 @@ def compute_gradient(positions, n_beads, epsilon=1.0, sigma=1.0, b=1.0, k_b=100.
     """
     Compute the gradient of the total energy function.
     """
-    grad = np.zeros_like(positions)
+    grad = grad = np.zeros((n_beads, 3))
     positions = positions.reshape((n_beads, -1))
     
     for i in range(n_beads - 1):
@@ -143,6 +143,7 @@ def compute_gradient(positions, n_beads, epsilon=1.0, sigma=1.0, b=1.0, k_b=100.
                 grad[i] += force
                 grad[j] -= force
     
+    print("Grad shape before flattening:", grad.shape) #JUST FOR TESTING
     return grad.flatten()
 
 # Optimization function
