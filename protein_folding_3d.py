@@ -142,7 +142,7 @@ def optimize_bfgs(func, initial_x, args, n_beads, max_iterations=1000, tolerance
 
 
 # MODIFIED: NEW NAME!!!!!!!!!!!
-def optimize_protein_structure(positions, n_beads, save_csv=False, max_iterations=10000, tolerance=1e-4, energy_threshold=None):
+def optimize_protein(positions, n_beads, save_csv=False, max_iterations=10000, tolerance=1e-4, energy_threshold=None):
     # Determine target energy if not provided
     if energy_threshold is None:
         energy_threshold = get_target_energy(n_beads)
@@ -269,7 +269,7 @@ if __name__ == "__main__":
     plot_protein_3d(initial_coords, title="Initial Configuration")
 
     # Perform optimization
-    optimization_result, optimization_trajectory = optimize_protein_structure(
+    optimization_result, optimization_trajectory = optimize_protein(
         initial_coords, num_beads, save_csv=True, max_iterations=10000, tolerance=1e-4
     )
 
