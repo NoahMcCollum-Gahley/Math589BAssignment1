@@ -42,7 +42,7 @@ def bond_potential(r, b=1.0, k_b=100.0):
     """
     return k_b * (r - b)**2
 
-# Total energy function. NEW, AND RENAMED!!!!!!!!!!!!!
+# Total energy function. 
 def compute_energy_and_gradient(x, n_beads, epsilon=1.0, sigma=1.0, b=1.0, k_b=100.0):
     positions = x.reshape((n_beads, -1))
     n_dim = positions.shape[1]
@@ -87,7 +87,6 @@ def compute_energy_and_gradient(x, n_beads, epsilon=1.0, sigma=1.0, b=1.0, k_b=1
     return total_energy, gradient.flatten()
 
 
-#NEW: NAME IS DIFFERENT!!!!!
 def optimize_bfgs(func, initial_x, args, n_beads, max_iterations=1000, tolerance=1e-6, step_size=1.0, decay=0.5, armijo_c=1e-4):
     x = initial_x.copy()
     dim = len(x)
@@ -141,7 +140,6 @@ def optimize_bfgs(func, initial_x, args, n_beads, max_iterations=1000, tolerance
 
 
 
-# MODIFIED: NEW NAME!!!!!!!!!!!
 def optimize_protein(positions, n_beads, write_csv=False, maxiter=10000, tol=1e-4, energy_threshold=None):
     # Determine target energy if not provided
     if energy_threshold is None:
@@ -255,7 +253,7 @@ def animate_optimization(trajectory, interval=100):
     )
     plt.show()
 
-# Main function. MODIFIED!!!!!
+# Main function.
 if __name__ == "__main__":
     num_beads = 100
     num_dimensions = 3
