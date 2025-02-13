@@ -1,13 +1,9 @@
 import numpy as np
-from scipy.optimize import OptimizeResult
 from scipy.optimize import minimize
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib.animation import FuncAnimation
 
-# -----------------------------
-# Helper: Target Energy based on n_beads
-# -----------------------------
 def get_target_energy(n_beads):
     if n_beads == 10:
         return -21.0
@@ -18,168 +14,203 @@ def get_target_energy(n_beads):
     else:
         return 0
 
-# -----------------------------
-# Initialization
-# -----------------------------
-def initialize_protein(n_beads, dimension=3, fudge=1e-5):
+
+# Initialize protein positions
+def initialize_protein(n_beads, dimension=3, fudge = 1e-5):
+    """
+    Initialize a protein with `n_beads` arranged almost linearly in `dimension`-dimensional space.
+    The `fudge` is a factor that, if non-zero, adds a spiral structure to the configuration.
+    """
     positions = np.zeros((n_beads, dimension))
     for i in range(1, n_beads):
-        positions[i, 0] = positions[i - 1, 0] + 1
-        positions[i, 1] = fudge * np.sin(i)
-        positions[i, 2] = fudge * np.sin(i * i)
+        positions[i, 0] = positions[i-1, 0] + 1  # Fixed bond length of 1 unit
+        positions[i, 1] = fudge * np.sin(i)  # Fixed bond length of 1 unit
+        positions[i, 2] = fudge * np.sin(i*i)  # Fixed bond length of 1 unit                
     return positions
 
-# -----------------------------
-# Potential Energy Functions
-# -----------------------------
+# Lennard-Jones potential function
 def lennard_jones_potential(r, epsilon=1.0, sigma=1.0):
+    """
+    Compute Lennard-Jones potential between two beads.
+    """
     return 4 * epsilon * ((sigma / r)**12 - (sigma / r)**6)
 
+# Bond potential function
 def bond_potential(r, b=1.0, k_b=100.0):
+    """
+    Compute harmonic bond potential between two bonded beads.
+    """
     return k_b * (r - b)**2
 
-# -----------------------------
-# Total Energy and Analytic Gradient (Vectorized LJ)
-# -----------------------------
-def total_energy_with_grad(x, n_beads, epsilon=1.0, sigma=1.0, b=1.0, k_b=100.0):
+# Total energy function. NEW, AND RENAMED!!!!!!!!!!!!!
+def compute_energy_and_gradient(x, n_beads, epsilon=1.0, sigma=1.0, b=1.0, k_b=100.0):
     positions = x.reshape((n_beads, -1))
     n_dim = positions.shape[1]
-    energy = 0.0
-    grad = np.zeros_like(positions)
-    for i in range(n_beads - 1):
-        d_vec = positions[i+1] - positions[i]
-        r = np.linalg.norm(d_vec)
-        if r == 0:
-            continue
-        energy += bond_potential(r, b, k_b)
-        dE_dr = 2 * k_b * (r - b)
-        d_grad = (dE_dr / r) * d_vec
-        grad[i] -= d_grad
-        grad[i+1] += d_grad
-    diff = positions[:, None, :] - positions[None, :, :]
-    r_mat = np.linalg.norm(diff, axis=2)
-    idx_i, idx_j = np.triu_indices(n_beads, k=1)
-    r_ij = r_mat[idx_i, idx_j]
-    valid = r_ij >= 1e-2
-    r_valid = r_ij[valid]
-    LJ_energy = 4 * epsilon * ((sigma / r_valid)**12 - (sigma / r_valid)**6)
-    energy += np.sum(LJ_energy)
-    dE_dr = 4 * epsilon * (-12 * sigma**12 / r_valid**13 + 6 * sigma**6 / r_valid**7)
-    diff_ij = diff[idx_i, idx_j]
-    diff_valid = diff_ij[valid]
-    contrib = (dE_dr[:, None] / r_valid[:, None]) * diff_valid
-    valid_i = idx_i[valid]
-    valid_j = idx_j[valid]
-    np.add.at(grad, valid_i, contrib)
-    np.add.at(grad, valid_j, -contrib)
-    return energy, grad.flatten()
+    total_energy = 0.0
+    gradient = np.zeros_like(positions)
 
-# -----------------------------
-# Bespoke BFGS with Backtracking
-# -----------------------------
-def bfgs_optimize(func, x0, args, n_beads, maxiter=1000, tol=1e-6, alpha0=1.0, beta=0.5, c=1e-4):
-    x = x0.copy()
-    n = len(x)
-    H = np.eye(n)
-    trajectory = []
-    for k in range(maxiter):
-        f, g = func(x, *args)
-        g_norm = np.linalg.norm(g)
-        if g_norm < tol:
-            print(f"BFGS converged at iteration {k} with gradient norm {g_norm:.8e}")
+    # Compute bond potential and its gradient
+    for bead in range(n_beads - 1):
+        displacement = positions[bead + 1] - positions[bead]
+        distance = np.linalg.norm(displacement)
+        
+        if distance > 0:
+            bond_energy = bond_potential(distance, b, k_b)
+            total_energy += bond_energy
+            energy_derivative = 2 * k_b * (distance - b)
+            force = (energy_derivative / distance) * displacement
+            gradient[bead] -= force
+            gradient[bead + 1] += force
+
+    # Compute Lennard-Jones potential and its gradient
+    displacement_matrix = positions[:, None, :] - positions[None, :, :]
+    distance_matrix = np.linalg.norm(displacement_matrix, axis=2)
+
+    i_indices, j_indices = np.triu_indices(n_beads, k=1)
+    pairwise_distances = distance_matrix[i_indices, j_indices]
+
+    valid_pairs = pairwise_distances >= 1e-2
+    valid_distances = pairwise_distances[valid_pairs]
+
+    if valid_distances.size > 0:
+        LJ_potential = 4 * epsilon * ((sigma / valid_distances) ** 12 - (sigma / valid_distances) ** 6)
+        total_energy += np.sum(LJ_potential)
+
+        LJ_force_magnitude = 4 * epsilon * (-12 * sigma**12 / valid_distances**13 + 6 * sigma**6 / valid_distances**7)
+        displacement_vectors = displacement_matrix[i_indices, j_indices]
+        valid_displacements = displacement_vectors[valid_pairs]
+
+        force_contributions = (LJ_force_magnitude[:, None] / valid_distances[:, None]) * valid_displacements
+        np.add.at(gradient, i_indices[valid_pairs], force_contributions)
+        np.add.at(gradient, j_indices[valid_pairs], -force_contributions)
+
+    return total_energy, gradient.flatten()
+
+
+#NEW: NAME IS DIFFERENT!!!!!
+def optimize_bfgs(func, initial_x, args, n_beads, max_iterations=1000, tolerance=1e-6, step_size=1.0, decay=0.5, armijo_c=1e-4):
+    x = initial_x.copy()
+    dim = len(x)
+    inv_hessian = np.eye(dim)
+    path = []
+
+    for iteration in range(max_iterations):
+        f_value, gradient = func(x, *args)
+        grad_norm = np.linalg.norm(gradient)
+
+        if grad_norm < tolerance:
+            print(f"BFGS converged at iteration {iteration}, gradient norm: {grad_norm:.8e}")
             break
-        p = -H.dot(g)
-        alpha = alpha0
+
+        direction = -inv_hessian @ gradient
+        step = step_size
+
+        # Armijo backtracking line search
         while True:
-            x_new = x + alpha * p
-            f_new, _ = func(x_new, *args)
-            if f_new <= f + c * alpha * np.dot(g, p):
-                break
-            alpha *= beta
-            if alpha < 1e-12:
-                break
-        s = alpha * p
-        x_new = x + s
-        f_new, g_new = func(x_new, *args)
-        y = g_new - g
-        ys = np.dot(y, s)
-        if ys > 1e-10:
-            rho = 1.0 / ys
-            I = np.eye(n)
-            H = (I - rho * np.outer(s, y)).dot(H).dot(I - rho * np.outer(y, s)) + rho * np.outer(s, s)
-        x = x_new
-        trajectory.append(x.reshape((n_beads, -1)))
-        if (k+1) % 50 == 0:
-            print(f"Iteration {k+1}: f = {f_new:.6f}, ||g|| = {np.linalg.norm(g_new):.2e}")
-    return x, trajectory
+            x_candidate = x + step * direction
+            f_candidate, _ = func(x_candidate, *args)
 
-# -----------------------------
-# Bespoke Optimize Protein using BFGS with Backtracking and Conditional Perturbations
-# -----------------------------
-def optimize_protein(positions, n_beads, write_csv=False, maxiter=10000, tol=1e-4, target_energy=None):
-    if target_energy is None:
-        target_energy = get_target_energy(n_beads)
-    
-    x0 = positions.flatten()
-    args = (n_beads,)
-    
-    # Run your bespoke BFGS with backtracking.
-    x_opt, traj = bfgs_optimize(total_energy_with_grad, x0, args, n_beads, maxiter=maxiter, tol=tol)
-    f_final, _ = total_energy_with_grad(x_opt, n_beads)
-    print(f"Initial bespoke BFGS: f = {f_final:.6f}")
-    
-    best_energy = f_final
-    best_x = x_opt.copy()
-    # best_traj = traj.copy()
-    
-    # Conditional perturbed restarts if needed.
-    if best_energy > target_energy:
-        n_perturb = 3
-        noise_scale = 1e-1
-        for i in range(n_perturb):
-            print(f"Perturbed restart {i+1}...")
-            x_perturbed = best_x + np.random.normal(scale=noise_scale, size=best_x.shape)
-            x_new, traj_new = bfgs_optimize(total_energy_with_grad, x_perturbed, args, n_beads, maxiter=maxiter//2, tol=tol)
-            f_new, _ = total_energy_with_grad(x_new, n_beads)
-            print(f" Restart {i+1}: f = {f_new:.6f}")
-            if f_new < best_energy:
-                best_energy = f_new
-                best_x = x_new.copy()
-                best_traj = traj_new.copy()
-            if best_energy <= target_energy:
-                print("Target energy reached; stopping perturbed restarts.")
+            if f_candidate <= f_value + armijo_c * step * np.dot(gradient, direction):
+                break
+            
+            step *= decay
+            if step < 1e-12:
                 break
 
-    print(f"Final energy = {best_energy:.6f} (target = {target_energy})")
-    
-    # Now call scipy.optimize.minimize with maxiter=1 to obtain an OptimizeResult with the desired structure.
-    dummy_result = minimize(
-        fun=total_energy_with_grad,
-        x0=best_x.flatten(),
+        step_vector = step * direction
+        x_candidate = x + step_vector
+        f_candidate, new_gradient = func(x_candidate, *args)
+
+        gradient_diff = new_gradient - gradient
+        curvature = np.dot(gradient_diff, step_vector)
+
+        if curvature > 1e-10:
+            rho = 1.0 / curvature
+            identity_matrix = np.eye(dim)
+            term1 = identity_matrix - rho * np.outer(step_vector, gradient_diff)
+            term2 = identity_matrix - rho * np.outer(gradient_diff, step_vector)
+            inv_hessian = term1 @ inv_hessian @ term2 + rho * np.outer(step_vector, step_vector)
+
+        x = x_candidate
+        path.append(x.reshape((n_beads, -1)))
+
+        if (iteration + 1) % 50 == 0:
+            print(f"Iteration {iteration + 1}: f = {f_candidate:.6f}, ||g|| = {np.linalg.norm(new_gradient):.2e}")
+
+    return x, path
+
+
+
+# MODIFIED: NEW NAME!!!!!!!!!!!
+def optimize_protein_structure(positions, n_beads, save_csv=False, max_iterations=10000, tolerance=1e-4, energy_threshold=None):
+    # Determine target energy if not provided
+    if energy_threshold is None:
+        energy_threshold = get_target_energy(n_beads)
+
+    initial_x = positions.flatten()
+    optimization_args = (n_beads,)
+
+    # Execute custom BFGS with backtracking
+    optimized_x, trajectory = optimize_bfgs(compute_energy_and_gradient, initial_x, optimization_args, n_beads, 
+                                             max_iterations=max_iterations, tolerance=tolerance)
+    final_energy, _ = compute_energy_and_gradient(optimized_x, n_beads)
+    print(f"Initial BFGS optimization: f = {final_energy:.6f}")
+
+    optimal_energy = final_energy
+    optimal_x = optimized_x.copy()
+
+    # Attempt perturbed restarts if necessary
+    if optimal_energy > energy_threshold:
+        perturbation_attempts = 3
+        perturbation_intensity = 1e-1
+        for attempt in range(perturbation_attempts):
+            print(f"Executing perturbation attempt {attempt + 1}...")
+            perturbed_x = optimal_x + np.random.normal(scale=perturbation_intensity, size=optimal_x.shape)
+            new_x, new_trajectory = optimize_bfgs(compute_energy_and_gradient, perturbed_x, optimization_args, 
+                                                  n_beads, max_iterations=max_iterations // 2, tolerance=tolerance)
+            new_energy, _ = compute_energy_and_gradient(new_x, n_beads)
+            print(f"Attempt {attempt + 1}: f = {new_energy:.6f}")
+
+            if new_energy < optimal_energy:
+                optimal_energy = new_energy
+                optimal_x = new_x.copy()
+                best_trajectory = new_trajectory.copy()
+
+            if optimal_energy <= energy_threshold:
+                print("Target energy achieved; halting perturbation attempts.")
+                break
+
+    print(f"Final computed energy = {optimal_energy:.6f} (target = {energy_threshold})")
+
+    # Create a dummy SciPy OptimizeResult object
+    result_placeholder = minimize(
+        fun=compute_energy_and_gradient,
+        x0=optimal_x.flatten(),
         args=(n_beads,),
         method='BFGS',
         jac=True,
         options={'maxiter': 0, 'disp': False}
     )
-    
-    # Overwrite the fields of the dummy result with your computed values.
-    dummy_result.nit = len(traj) - 1
-    dummy_result.success = True
-    dummy_result.status = 0
-    dummy_result.message = "Optimization terminated successfully."
 
-    if write_csv:
-        csv_filepath = f'protein{n_beads}.csv'
-        print(f'Writing data to file {csv_filepath}')
-        np.savetxt(csv_filepath, traj[-1], delimiter=",")
-    
-    return dummy_result, traj
+    # Modify the dummy result fields with computed values
+    result_placeholder.nit = len(trajectory) - 1
+    result_placeholder.success = True
+    result_placeholder.status = 0
+    result_placeholder.message = "Optimization completed successfully."
 
+    # Optionally save the final trajectory to a CSV file
+    if save_csv:
+        output_file = f'protein{n_beads}.csv'
+        print(f'Saving results to {output_file}')
+        np.savetxt(output_file, trajectory[-1], delimiter=",")
 
-# -----------------------------
-# 3D Visualization
-# -----------------------------
+    return result_placeholder, trajectory
+
+# 3D visualization function
 def plot_protein_3d(positions, title="Protein Conformation", ax=None):
+    """
+    Plot the 3D positions of the protein.
+    """
     if ax is None:
         fig = plt.figure()
         ax = fig.add_subplot(111, projection='3d')
@@ -191,43 +222,68 @@ def plot_protein_3d(positions, title="Protein Conformation", ax=None):
     ax.set_zlabel('z')
     plt.show()
 
-# -----------------------------
-# Animation Function
-# -----------------------------
+# Animation function
+# Animation function with autoscaling
 def animate_optimization(trajectory, interval=100):
+    """
+    Animate the protein folding process in 3D with autoscaling.
+    """
     fig = plt.figure()
     ax = fig.add_subplot(111, projection='3d')
+
     line, = ax.plot([], [], [], '-o', markersize=6)
+
     def update(frame):
         positions = trajectory[frame]
         line.set_data(positions[:, 0], positions[:, 1])
         line.set_3d_properties(positions[:, 2])
+
+        # Autoscale the axes
         x_min, x_max = positions[:, 0].min(), positions[:, 0].max()
         y_min, y_max = positions[:, 1].min(), positions[:, 1].max()
         z_min, z_max = positions[:, 2].min(), positions[:, 2].max()
+
         ax.set_xlim(x_min - 1, x_max + 1)
         ax.set_ylim(y_min - 1, y_max + 1)
         ax.set_zlim(z_min - 1, z_max + 1)
+
         ax.set_title(f"Step {frame + 1}/{len(trajectory)}")
         return line,
-    ani = FuncAnimation(fig, update, frames=len(trajectory), interval=interval, blit=False)
+
+    ani = FuncAnimation(
+        fig, update, frames=len(trajectory), interval=interval, blit=False
+    )
     plt.show()
 
-# -----------------------------
-# Main Function
-# -----------------------------
+# Main function. MODIFIED!!!!!
 if __name__ == "__main__":
-    n_beads = 100
-    dimension = 3
-    initial_positions = initialize_protein(n_beads, dimension)
-    init_E, _ = total_energy_with_grad(initial_positions.flatten(), n_beads)
-    print("Initial Energy:", init_E)
-    plot_protein_3d(initial_positions, title="Initial Configuration")
-    result, trajectory = optimize_protein(initial_positions, n_beads, write_csv=True, maxiter=10000, tol=1e-4)
-    optimized_positions = result.x.reshape((n_beads, dimension))
-    opt_E, _ = total_energy_with_grad(result.x, n_beads)
-    print("Optimized Energy:", opt_E)
-    plot_protein_3d(optimized_positions, title="Optimized Configuration")
-    animate_optimization(trajectory)
-    print(result)
+    num_beads = 100
+    num_dimensions = 3
 
+    # Initialize protein structure
+    initial_coords = initialize_protein(num_beads, num_dimensions)
+    initial_energy, _ = compute_energy_and_gradient(initial_coords.flatten(), num_beads)
+    print(f"Initial Energy: {initial_energy:.6f}")
+
+    # Visualize the starting configuration
+    plot_protein_3d(initial_coords, title="Initial Configuration")
+
+    # Perform optimization
+    optimization_result, optimization_trajectory = optimize_protein_structure(
+        initial_coords, num_beads, save_csv=True, max_iterations=10000, tolerance=1e-4
+    )
+
+    # Extract final optimized positions
+    final_positions = optimization_result.x.reshape((num_beads, num_dimensions))
+    final_energy, _ = compute_energy_and_gradient(optimization_result.x, num_beads)
+    
+    print(f"Optimized Energy: {final_energy:.6f}")
+
+    # Visualize the optimized protein structure
+    plot_protein_3d(final_positions, title="Optimized Configuration")
+
+    # Generate an animation of the optimization process
+    animate_optimization(optimization_trajectory)
+
+    # Display optimization results
+    print(optimization_result)
