@@ -142,7 +142,7 @@ def optimize_bfgs(func, initial_x, args, n_beads, max_iterations=1000, tolerance
 
 
 # MODIFIED: NEW NAME!!!!!!!!!!!
-def optimize_protein(positions, n_beads, save_csv=False, max_iterations=10000, tolerance=1e-4, energy_threshold=None):
+def optimize_protein(positions, n_beads, write_csv=False, max_iterations=10000, tolerance=1e-4, energy_threshold=None):
     # Determine target energy if not provided
     if energy_threshold is None:
         energy_threshold = get_target_energy(n_beads)
@@ -199,7 +199,7 @@ def optimize_protein(positions, n_beads, save_csv=False, max_iterations=10000, t
     result_placeholder.message = "Optimization completed successfully."
 
     # Optionally save the final trajectory to a CSV file
-    if save_csv:
+    if write_csv:
         output_file = f'protein{n_beads}.csv'
         print(f'Saving results to {output_file}')
         np.savetxt(output_file, trajectory[-1], delimiter=",")
