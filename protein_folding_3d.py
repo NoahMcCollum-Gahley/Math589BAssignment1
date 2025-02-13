@@ -142,7 +142,7 @@ def optimize_bfgs(func, initial_x, args, n_beads, max_iterations=1000, tolerance
 
 
 # MODIFIED: NEW NAME!!!!!!!!!!!
-def optimize_protein(positions, n_beads, write_csv=False, max_iterations=10000, tolerance=1e-4, energy_threshold=None):
+def optimize_protein(positions, n_beads, write_csv=False, maxiter=10000, tol=1e-4, energy_threshold=None):
     # Determine target energy if not provided
     if energy_threshold is None:
         energy_threshold = get_target_energy(n_beads)
@@ -152,7 +152,7 @@ def optimize_protein(positions, n_beads, write_csv=False, max_iterations=10000, 
 
     # Execute custom BFGS with backtracking
     optimized_x, trajectory = optimize_bfgs(compute_energy_and_gradient, initial_x, optimization_args, n_beads, 
-                                             max_iterations=max_iterations, tolerance=tolerance)
+                                             max_iterations=maxiter, tolerance=tol)
     final_energy, _ = compute_energy_and_gradient(optimized_x, n_beads)
     print(f"Initial BFGS optimization: f = {final_energy:.6f}")
 
@@ -167,7 +167,7 @@ def optimize_protein(positions, n_beads, write_csv=False, max_iterations=10000, 
             print(f"Executing perturbation attempt {attempt + 1}...")
             perturbed_x = optimal_x + np.random.normal(scale=perturbation_intensity, size=optimal_x.shape)
             new_x, new_trajectory = optimize_bfgs(compute_energy_and_gradient, perturbed_x, optimization_args, 
-                                                  n_beads, max_iterations=max_iterations // 2, tolerance=tolerance)
+                                                  n_beads, max_iterations=maxiter // 2, tolerance=tol)
             new_energy, _ = compute_energy_and_gradient(new_x, n_beads)
             print(f"Attempt {attempt + 1}: f = {new_energy:.6f}")
 
